@@ -14,15 +14,26 @@ const { debugLog } = require("./debug-log");
 
 const service = new Service("com.pwntastic.sshclient.service");
 
-// webos-service sets message.sender to the caller's application id (via
-// LSMessageGetApplicationID) or service name; anonymous shell luna-send has
-// neither. This is a soft gate on a rooted TV (luna-send -a can spoof), but
-// it stops other sideloaded apps/services from silently reading keys or
-// writing into sessions.
+// Who is calling. An app carries an application id (LSMessageGetApplicationID),
+// a service carries a service name, and the two arrive in different fields —
+// until 0.8.2 only the first was consulted, so a sideloaded *service*, which
+// has no application id at all, fell into the "no identity" case below and was
+// waved through. Our own app is unaffected either way: its calls come from the
+// web app and carry the application id.
+function callerIdentity(message) {
+  if (!message) return "";
+  return String(message.sender || message.senderServiceName || "");
+}
+
+// This is a soft gate on a rooted TV (luna-send -a can spoof any id, and root
+// can read the keystore off the filesystem without asking us at all), but it
+// stops other sideloaded apps and services from silently reading keys or
+// writing into sessions. A caller with no identity whatsoever is still allowed:
+// see the caller_seen log below — flipping that to a denial needs evidence from
+// a real device that nothing legitimate arrives that way.
 function callerAllowed(message) {
-  const sender = message && message.sender;
-  if (!sender) return true;
-  const name = String(sender);
+  const name = callerIdentity(message);
+  if (!name) return true;
   // luna-send registers as com.webos.lunasend-<pid> on this firmware; only
   // root / developer mode can run it, so it stays allowed for debugging
   // (and for the knownhosts/remove recovery path).
@@ -32,14 +43,29 @@ function callerAllowed(message) {
   );
 }
 
+// One line per distinct caller identity, so "who actually calls this service"
+// is answerable from a device log instead of by reasoning about the platform.
+// The anonymous case in particular is what stands between the gate above and a
+// hard deny-by-default. Capped: an identity is caller-controlled input, and an
+// unbounded set of them is a slow memory leak with a spoofer at the other end.
+const seenCallers = new Set();
+
+function noteCaller(method, message) {
+  const id = callerIdentity(message) || "(anonymous)";
+  if (seenCallers.has(id) || seenCallers.size >= 20) return;
+  seenCallers.add(id);
+  debugLog("caller_seen", { method, caller: id });
+}
+
 function register(name, requestHandler, cancelHandler) {
   service.register(
     name,
     (message) => {
+      noteCaller(name, message);
       if (!callerAllowed(message)) {
         debugLog("caller_denied", {
           method: name,
-          sender: message && message.sender,
+          sender: callerIdentity(message),
         });
         return safeRespond(message, {
           returnValue: false,

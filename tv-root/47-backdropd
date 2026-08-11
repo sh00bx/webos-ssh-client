@@ -67,3 +67,56 @@ EOF
 ls-control scan-services >/dev/null 2>&1 || true
 
 start-stop-daemon --start --background --exec /var/lib/webosbrew/backdropd
+
+# --- watchdog ---------------------------------------------------------------
+# backdropd can wedge: its main thread calls vt_stop_session() when the last
+# client disconnects (i.e. every time the app is closed), and libvtcapture's
+# teardown joins an internal thread that sometimes never returns. The process
+# stays alive and keeps its listening socket, but never returns to accept() —
+# so the only symptom the owner sees is "the Chameleon theme stopped working",
+# and the fix is the one below: kill it and start it again.
+#
+# The signature is exact and costs nothing to look for: a LISTEN socket whose
+# receive queue (= the accept backlog) is non-empty has connections nobody is
+# taking. Read straight out of /proc/net/tcp so this needs neither netstat nor
+# ss: field 2 is the local address (127.0.0.1:8093 = 0100007F:1F9D), field 4
+# the state (0A = LISTEN), field 5 tx_queue:rx_queue in hex.
+#
+# Two consecutive samples 30s apart before acting — a single sample can catch a
+# connection that legitimately arrived microseconds ago, and restarting a
+# healthy daemon drops the colour feed of a running session.
+cat > /var/lib/webosbrew/backdropd-watch.new <<'EOF'
+#!/bin/sh
+echo $$ > /tmp/backdropd-watch.pid
+hits=0
+while sleep 30; do
+  q=$(awk '$2 == "0100007F:1F9D" && $4 == "0A" { split($5, t, ":"); print t[2]; exit }' /proc/net/tcp)
+  # The queue is a fixed-width hex field, so "any digit that is not 0" is the
+  # whole test — no hex arithmetic, and an empty $q (no such socket: the daemon
+  # is not running, which is not this watchdog's problem) falls through to 0.
+  case "$q" in *[!0]*) hits=$((hits + 1));; *) hits=0;; esac
+  [ "$hits" -ge 2 ] || continue
+  hits=0
+  p=$(cat /tmp/backdropd.pid 2>/dev/null)
+  case "$p" in ""|*[!0-9]*) continue;; esac
+  # Validated before it reaches kill: this runs as root, and an unquoted pid
+  # from a file is an argument list, not a number.
+  kill "$p" 2>/dev/null
+  sleep 2
+  kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null && sleep 1
+  start-stop-daemon --start --background --exec /var/lib/webosbrew/backdropd
+  echo "$(date) restarted wedged backdropd (pid $p)" >> /var/lib/webosbrew/.backdropd-watch.log
+done
+EOF
+chmod 755 /var/lib/webosbrew/backdropd-watch.new
+# Rename, never write over the live file: /bin/sh reads a script incrementally,
+# so rewriting the one a running watchdog is executing would resume it at the
+# same byte offset in different text. The rename leaves the old inode to the
+# old process, which is killed immediately below anyway.
+mv /var/lib/webosbrew/backdropd-watch.new /var/lib/webosbrew/backdropd-watch
+
+# Idempotent like everything else in this hook: it is re-run whenever the app
+# updates a helper, and two watchdogs would fight over one daemon.
+wp=$(cat /tmp/backdropd-watch.pid 2>/dev/null)
+case "$wp" in ""|*[!0-9]*) ;; *) kill "$wp" 2>/dev/null;; esac
+start-stop-daemon --start --background --exec /var/lib/webosbrew/backdropd-watch

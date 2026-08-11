@@ -21,26 +21,33 @@ import { placeTip, tipIsShowable } from "./tooltip.mjs";
 // remote just lies on the sofa — see the drag-test note in the platform
 // gotchas) does not paint the screen with bubbles on its way past, and long
 // enough that crossing the toolbar to reach a button does not flash a bubble
-// for every control on the way. 420ms was measured as too eager in use.
-const SHOW_DELAY_MS = 750;
+// for every control on the way. Judged on the device, at couch distance, and
+// twice too eager on the way here: 420ms, then 750ms.
+const SHOW_DELAY_MS = 1000;
 // The focus ring is a deliberate act, so its bubble comes up much sooner — but
 // not instantly: holding a D-pad direction walks several controls per second,
 // and one bubble per stop on the way is exactly the strobing this delay exists
 // to prevent.
 const FOCUS_DELAY_MS = 260;
-// Once one bubble has been shown, neighbours open immediately: walking a
-// toolbar should feel like reading a row of labels, not like waiting nine
-// times.
-const WARM_MS = 1200;
+// Every anchor waits out the full delay, including the neighbour you move to
+// straight after reading a bubble. Until 0.8.2 a "warm" window let neighbours
+// open instantly, on the theory that walking a toolbar should read like a row
+// of labels — in practice it made the delay look broken: the first button you
+// touched waited, every button after it fired the instant the pointer arrived.
 const HIDE_DELAY_MS = 60;
 
 let tipEl = null;
 let textEl = null;
 let arrowEl = null;
 let anchorEl = null;
+// The anchor whose delay is currently running. Kept apart from anchorEl so that
+// a pointerover on a child of the same control (a button's icon span, a tab's
+// label) is recognised as "already waiting for this one" instead of restarting
+// the clock — with no warm window left, a restarting clock would mean the
+// bubble never appears while the pointer keeps moving inside the button.
+let pendingEl = null;
 let showTimer = null;
 let hideTimer = null;
-let lastHiddenAt = 0;
 let installed = false;
 // Watches the live anchor for `title`/`data-tip` edits: the sliders rewrite
 // their own label on every step ("Panel opacity: 62%"), and a bubble that keeps
@@ -90,6 +97,7 @@ function clearTimers() {
     clearTimeout(showTimer);
     showTimer = null;
   }
+  pendingEl = null;
   if (hideTimer) {
     clearTimeout(hideTimer);
     hideTimer = null;
@@ -155,27 +163,25 @@ function showNow(el) {
 function hideNow() {
   clearTimers();
   stopObserving();
-  if (anchorEl) lastHiddenAt = Date.now();
   anchorEl = null;
   if (tipEl) tipEl.classList.remove("open");
 }
 
 function scheduleShow(el) {
-  if (anchorEl === el) {
+  if (anchorEl === el || pendingEl === el) {
     if (hideTimer) {
       clearTimeout(hideTimer);
       hideTimer = null;
     }
     return;
   }
-  clearTimers();
-  const warm = anchorEl !== null || Date.now() - lastHiddenAt < WARM_MS;
-  if (warm) {
-    showNow(el);
-    return;
-  }
+  // Moving to a different anchor closes the open bubble at once: leaving it up
+  // while the new one waits out its delay would label the wrong control.
+  hideNow();
+  pendingEl = el;
   showTimer = setTimeout(() => {
     showTimer = null;
+    pendingEl = null;
     // The pointer may have left during the delay; the element may have been
     // re-rendered under it. showNow re-checks both.
     showNow(el);
@@ -220,10 +226,14 @@ function onFocusIn(event) {
     hideNow();
     return;
   }
-  clearTimers();
+  // Already shown, or already counting down for this control (focusin fires
+  // again when focus lands on a child): leave the clock alone.
+  if (anchorEl === anchor || pendingEl === anchor) return;
   hideNow();
+  pendingEl = anchor;
   showTimer = setTimeout(() => {
     showTimer = null;
+    pendingEl = null;
     // Still the focused element? A held direction key has moved on by now.
     if (document.activeElement && document.activeElement.closest &&
         document.activeElement.closest("[data-tip]") === anchor) {
