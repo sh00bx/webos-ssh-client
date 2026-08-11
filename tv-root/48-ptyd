@@ -1,0 +1,26 @@
+#!/bin/sh
+# webosbrew boot hook (run-parts /var/lib/webosbrew/init.d): start ptyd, the
+# pseudo-terminal provider behind the webos-ssh-client "Local shell".
+#
+# The app's Node service is chrooted into /var/palm/jail/<service>/ as uid 5301
+# and that jail has no /dev/ptmx and no /dev/pts, so it cannot allocate a
+# terminal at all — see the header of tv-root/ptyd.c for the measurement. This
+# helper runs as root outside the jail, forks a login shell onto a real pty per
+# connection, and serves it over a unix socket the jail can reach.
+#
+# Filename has NO dot on purpose (busybox run-parts skips names with dots).
+# Duplicate-start guard is the pidfile check inside ptyd itself
+# (start-stop-daemon --exec matching is unreliable across binary updates) —
+# same arrangement as 47-backdropd next to it.
+#
+# No luna role file is needed here, unlike backdropd: ptyd talks to nothing on
+# the bus. It needs root purely for /dev/ptmx and for the shell it forks.
+#
+# SECURITY. The socket IS the authorisation: ptyd chowns it to the uid that
+# owns /media/internal/.com.pwntastic.sshclient (the app's storage directory,
+# i.e. whoever the jailer gave our service) and leaves it at 0600 inside a 0700
+# directory. Anything that cannot open that socket cannot get the shell.
+# Remove this hook and kill the pid in /tmp/.sshclient-ptyd/ptyd.pid to turn
+# the feature off (scripts/install-ptyd.sh --uninstall does both).
+
+start-stop-daemon --start --background --exec /var/lib/webosbrew/ptyd

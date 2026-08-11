@@ -1,0 +1,21 @@
+{
+  "name": "webos-ssh-client",
+  "version": "0.8.1",
+  "private": true,
+  "description": "SSH client as webOS IPK for rooted LG OLED TVs",
+  "license": "MIT",
+  "scripts": {
+    "build:frontend": "esbuild src/main.js --bundle --minify --outfile=dist/main.js --target=es2019 --loader:.css=css --loader:.woff2=file --loader:.ttf=file --asset-names=assets/[name] --define:__APP_VERSION__=\\\"v$npm_package_version\\\"",
+    "build": "bash scripts/build.sh",
+    "install:tv": "bash scripts/install.sh",
+    "test": "bash -c 'set -e; ls service/lib/*.js service/lib/handlers/*.js >/dev/null; for f in service/service.js service/lib/*.js service/lib/handlers/*.js; do node --check \"$f\"; done' && node tests/service-connect.test.js && node tests/keymap.test.mjs && node tests/color.test.mjs && node tests/window-geometry.test.mjs && node tests/osc52.test.mjs && node tests/cell-bg.test.mjs && node tests/ink-field.test.mjs && node tests/ink-map.test.mjs && node tests/smoothing.test.mjs && node tests/sftp-paths.test.mjs && node tests/version.test.mjs && node tests/webos-glyphs.test.mjs && node tests/pty-frames.test.mjs && node tests/osk-input.test.mjs && node tests/session-label.test.mjs && node tests/focus-ring.test.mjs && node tests/tooltip.test.mjs && node tests/root-helpers.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.0",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0",
+    "xterm-addon-search": "^0.13.0",
+    "xterm-addon-web-links": "^0.9.0",
+    "xterm-addon-webgl": "^0.16.0"
+  }
+}

@@ -1,0 +1,3084 @@
+@font-face {
+  font-family: "Pwntastic Terminal Mono";
+  src: url("../assets/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../assets/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("../assets/fonts/InstrumentSerif-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("../assets/fonts/InstrumentSerif-Italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Major Mono Display";
+  src: url("../assets/fonts/MajorMonoDisplay-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --ink-0: #050607;
+  --ink-1: #0a0c0e;
+  --ink-2: #101318;
+  --rule: rgba(255, 255, 255, 0.08);
+  --rule-strong: rgba(255, 255, 255, 0.16);
+  --text-1: #e9ecef;
+  --text-2: #9aa1aa;
+  --text-3: #757d88;
+  --accent: #73ff9a;
+  /* Same colour as --accent, as a bare triplet: rgba() compositions must be
+     written at the use site (see the --panel-bg-rgb note above), so any rule
+     that needs a translucent accent reads rgba(var(--accent-rgb), a). */
+  --accent-rgb: 115, 255, 154;
+  --accent-dim: #3aa468;
+  --alarm: #ff6a5b;
+  /* Caution, distinct from --alarm: a stuck Caps Lock is advisory, not a
+     failure, and must not read as "your login was rejected". Every theme takes
+     this from its own muted ANSI yellow (themes.mjs), so the badge is already
+     OLED-tuned and in-palette wherever it appears. */
+  --warn: #c0c07e;
+  --warn-line: rgba(192, 192, 126, 0.42);
+  --warn-fill: rgba(192, 192, 126, 0.12);
+  --shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.7);
+  /* The terminal panel tint is composed at the use site in .term-wrapper as
+     rgba(--panel-bg-rgb, --term-alpha) so the toolbar's opacity slider can set
+     --term-alpha inline on the wrapper. Do NOT recompose these into a single
+     custom property here: var() inside a custom property resolves at its
+     definition site, which would bake :root's alpha in and make per-wrapper
+     overrides silently no-ops. Themes only ever override --panel-bg-rgb. */
+  --panel-bg-rgb: 8, 9, 11;
+  --term-alpha: 0.86;
+  /* Alpha for cell backgrounds the shell paints itself (see cell-bg.mjs). The
+     toolbar overwrites it on .term-wrapper on every slider move; this default
+     only covers the frames between terminal creation and the first applyOpacity
+     and matches --term-alpha above so nothing flashes. */
+  --term-cell-alpha: 0.86;
+  --panel-bg-strong: rgba(13, 15, 18, 0.92);
+  --panel-border: rgba(255, 255, 255, 0.18);
+  --ease-1: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-1: 180ms;
+  --dur-2: 360ms;
+
+  --font-mono: "JetBrains Mono", "Liberation Mono", "DejaVu Sans Mono", monospace;
+  --font-display: "Instrument Serif", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-wordmark: "Major Mono Display", "JetBrains Mono", "Liberation Mono", monospace;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body.overlay-hidden {
+  background: transparent;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+/* ---------- Terminal session ---------- */
+
+.term-wrapper {
+  --tv-safe-top: 4px;
+  --tv-safe-right: 4px;
+  --tv-safe-bottom: 4px;
+  --tv-safe-left: 4px;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: min(1120px, 100vw);
+  height: min(690px, 100vh);
+  box-sizing: border-box;
+  padding: var(--tv-safe-top) var(--tv-safe-right) var(--tv-safe-bottom) var(--tv-safe-left);
+  background: rgba(var(--panel-bg-rgb), var(--term-alpha));
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow);
+  /* No backdrop-filter here: the terminal repaints constantly (scroll,
+     cursor blink) and blurring the live TV underneath costs GPU time on
+     every composite. The near-opaque panel bg makes blur invisible anyway. */
+}
+
+/* Panel opacity is continuous: the toolbar slider writes --term-alpha as an
+   inline style on .term-wrapper. Only the alpha changes — the rgb triplet
+   stays per-theme, and no backdrop-filter is introduced at any level (see the
+   perf note above). */
+
+.term-wrapper.fullscreen {
+  inset: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw !important;
+  height: 100vh !important;
+  border: 0;
+  box-shadow: none;
+}
+
+.term-wrapper.fullscreen .resize-handle {
+  display: none;
+}
+
+/* Toolbar and keybar rows are sized for the Magic Remote pointer: every
+   control is at least 30px tall. The frame height math below must match
+   the row heights + their bottom margins (toolbar 34+4, keybar 34+4). */
+.term-frame {
+  width: 100%;
+  height: calc(100% - 38px);
+  outline: none;
+}
+
+/* Special-key bar (Esc/Tab/^C/arrows) for Magic-Remote-only use. When shown
+   it occupies a fixed row, so the frame height math must include it. */
+.term-wrapper.keybar-on .term-frame {
+  height: calc(100% - 38px - 38px);
+}
+
+/* Nine 52px buttons plus gaps need ~532px, but the window can be dragged down
+   to TERMINAL_MIN_WIDTH (480px). The row used to overflow silently: with
+   `justify-content: flex-end` and no overflow rule, Esc/Tab/^C were pushed out
+   through the LEFT edge of the panel and painted on the live TV picture.
+   It scrolls instead of wrapping — the frame height below subtracts a fixed
+   38px per row, so a second row would push the terminal out of the panel.
+   Right-alignment comes from an auto margin on the first button rather than
+   `justify-content: flex-end`, because that combination makes the overflowing
+   start of a scroll container unreachable in Chromium. */
+.term-keybar {
+  height: 34px;
+  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.term-keybar::-webkit-scrollbar {
+  display: none;
+}
+
+.term-keybar button:first-child {
+  margin-left: auto;
+}
+
+.term-keybar[hidden] {
+  display: none;
+}
+
+.term-keybar button {
+  min-width: 52px;
+  /* Buttons must not shrink inside the scroll container — shrinking is what
+     would let them collapse below the Magic-Remote pointer target size. */
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 12px;
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--panel-border);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: color 120ms var(--ease-1), border-color 120ms var(--ease-1),
+    background 120ms var(--ease-1);
+}
+
+.term-keybar button:hover,
+.term-keybar button:focus {
+  color: var(--text-1);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.term-toolbar .keybar-toggle.active {
+  color: var(--accent);
+}
+
+/* The system-keyboard toggle. Text rather than a glyph — the bundled fonts are
+   the only ones on the device and none of them carries a keyboard symbol, so
+   an icon here would render as tofu. Narrower tracking keeps three letters
+   inside the same footprint as the single-glyph buttons beside it. */
+.term-toolbar .osk-toggle {
+  font-size: 11px;
+  letter-spacing: -0.02em;
+}
+
+.term-toolbar .osk-toggle.active {
+  color: var(--accent);
+}
+
+.term-toolbar {
+  height: 34px;
+  margin: 0 0 4px;
+  padding: 0 2px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  cursor: grab;
+  /* Title-bar wash + baseline rule. Inset shadow instead of border-bottom:
+     the 34px height is load-bearing for the frame-height math (34 + 4px
+     margin = the 38px the frame calc subtracts), so nothing may add layout
+     height here. */
+  background: linear-gradient(
+    rgba(255, 255, 255, 0.035),
+    rgba(255, 255, 255, 0.008)
+  );
+  box-shadow: inset 0 -1px 0 var(--rule-strong);
+}
+
+.term-toolbar.moving {
+  cursor: grabbing;
+}
+
+/* The maximised toolbar keeps the grab cursor: dragging it restores the window
+   and moves it, so `default` would have been advertising the wrong thing. */
+
+.term-toolbar > button,
+.term-toolbar .zoom-group,
+.term-toolbar .font-readout {
+  cursor: pointer;
+}
+
+.term-toolbar .zoom-group .font-readout {
+  cursor: default;
+}
+
+.term-toolbar button {
+  height: 30px;
+  padding: 0 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--rule-strong);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 120ms var(--ease-1), border-color 120ms var(--ease-1),
+    background 120ms var(--ease-1);
+}
+
+.term-toolbar button:focus,
+.term-toolbar button:hover {
+  color: var(--text-1);
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+}
+
+.term-toolbar button:active {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* Hairline divider between toolbar clusters (zoom │ tabs │ view controls). */
+.term-toolbar .tb-sep {
+  width: 1px;
+  height: 16px;
+  flex: 0 0 auto;
+  background: var(--rule-strong);
+}
+
+/* Terminator-style tab strip: sits between the zoom group and the view
+   controls, flexes to fill the middle, and shrinks before anything else
+   does (min-width 0 + hidden overflow) so the window controls never get
+   pushed out on narrow windows. Tabs render in the user's own status-line
+   dialect (`1:218*`) — lowercase mono, no chrome around them, the active
+   one carries the accent and a 2px underline like a terminal tab. */
+.term-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.term-tabs[hidden] {
+  display: none;
+}
+
+.term-tabs .term-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 10px;
+  /* Chrome-style width behavior: every tab grows equally up to a max that
+     fits a full IPv4 label (`8:192.168.0.218*` ≈ 16 mono chars @12px) NEXT TO
+     both 26px controls, and shrinks equally down to a stub with ellipsis when
+     the strip runs out of room. The max grew with the controls: at the old
+     200px the label would now clip an address it used to show whole. */
+  flex: 1 1 auto;
+  max-width: 224px;
+  min-width: 56px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0.03em;
+  color: var(--text-3);
+  background: transparent;
+  border-color: transparent;
+  border-bottom: 2px solid transparent;
+}
+
+.term-tabs .term-tab .term-tab-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+/* The two in-tab controls. 26px square, which is the smallest box the Magic
+   Remote's pointer lands on reliably from the couch — the 16px close and the
+   10px-wide swap glyph that shipped in 0.6.1 were a text-sized target being
+   used as a button. 26 is also the largest square that still leaves the label
+   room for a full IPv4 inside a 224px tab, and fits the 30px tab height. */
+.term-tabs .term-tab .term-tab-x,
+.term-tabs .term-tab .term-tab-swap {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: var(--text-3);
+  border-radius: 3px;
+  transition: opacity 120ms var(--ease-1), color 120ms var(--ease-1),
+    background 120ms var(--ease-1);
+}
+
+/* The icon must never be the event target: the tab's single click handler
+   routes on `event.target.closest(...)`, and hover styling keys off the box. */
+.term-tabs .term-tab .term-tab-x svg,
+.term-tabs .term-tab .term-tab-swap svg {
+  width: 15px;
+  height: 15px;
+  pointer-events: none;
+}
+
+/* Chrome-style close: always present on the active tab, revealed on hover
+   elsewhere (the Magic Remote pointer hovers before every click anyway). */
+.term-tabs .term-tab .term-tab-x {
+  opacity: 0;
+}
+
+.term-tabs .term-tab:hover .term-tab-x,
+.term-tabs .term-tab:focus .term-tab-x,
+.term-tabs .term-tab.active .term-tab-x {
+  opacity: 1;
+}
+
+.term-tabs .term-tab .term-tab-x:hover {
+  color: var(--alarm);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.term-tabs .term-tab .term-tab-swap:hover {
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.term-tabs .term-tab:hover,
+.term-tabs .term-tab:focus {
+  color: var(--text-1);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: transparent;
+  border-bottom-color: var(--rule-strong);
+}
+
+.term-tabs .term-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: rgba(var(--accent-rgb, 255, 255, 255), 0.08);
+}
+
+.term-tabs .term-tab.active:hover,
+.term-tabs .term-tab.active:focus {
+  border-bottom-color: var(--accent);
+}
+
+.term-tabs .term-tab-new {
+  flex: 0 0 auto;
+  width: 30px;
+  max-width: none;
+  min-width: 30px;
+  /* Neutralize the tab's asymmetric label/× padding and center the glyph. */
+  padding: 0;
+  gap: 0;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  border: 1px dashed var(--rule-strong);
+  border-radius: 3px;
+  color: var(--text-3);
+}
+
+.term-tabs .term-tab-new:hover,
+.term-tabs .term-tab-new:focus {
+  color: var(--accent);
+  border-color: var(--accent);
+  border-style: dashed;
+  background: rgba(var(--accent-rgb, 255, 255, 255), 0.06);
+}
+
+/* Disconnect reads as the one destructive control up here. */
+.term-toolbar .tb-danger:hover,
+.term-toolbar .tb-danger:focus {
+  color: var(--alarm);
+  border-color: var(--alarm);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.term-toolbar .zoom-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.term-toolbar .zoom-group button {
+  width: 34px;
+  padding: 0;
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+.term-toolbar .font-readout {
+  min-width: 44px;
+  height: 30px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  border: 1px solid transparent;
+}
+
+.term-toolbar .icon-btn {
+  width: 34px;
+  padding: 0;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.resize-handle {
+  position: absolute;
+  z-index: 2;
+  background: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
+
+/* Hit-area sizing: the Magic Remote pointer drifts a couple of px while the
+   button is held, so the zones are sized for a TV, not a desktop — edges are
+   10px thick (4 outside the frame, 6 over it) and corners 18x18. Each edge
+   stays 18px clear of both ends so all four corners keep their own zone. */
+.resize-handle.n {
+  top: -4px;
+  left: 18px;
+  right: 18px;
+  height: 10px;
+  cursor: ns-resize;
+}
+
+.resize-handle.w {
+  left: -4px;
+  top: 18px;
+  bottom: 18px;
+  width: 10px;
+  cursor: ew-resize;
+}
+
+/* The far edges and corners geometrically mirror the near ones. They only
+   look redundant: the window is anchored bottom-right, so a far-side handle
+   also walks the anchor — that difference lives in startDrag(), not here. */
+.resize-handle.s {
+  bottom: -4px;
+  left: 18px;
+  right: 18px;
+  height: 10px;
+  cursor: ns-resize;
+}
+
+.resize-handle.e {
+  right: -4px;
+  top: 18px;
+  bottom: 18px;
+  width: 10px;
+  cursor: ew-resize;
+}
+
+.resize-handle.nw,
+.resize-handle.ne,
+.resize-handle.sw,
+.resize-handle.se {
+  width: 18px;
+  height: 18px;
+  z-index: 3;
+}
+
+.resize-handle.nw {
+  top: -4px;
+  left: -4px;
+  cursor: nwse-resize;
+}
+
+.resize-handle.se {
+  bottom: -4px;
+  right: -4px;
+  cursor: nwse-resize;
+}
+
+.resize-handle.ne {
+  top: -4px;
+  right: -4px;
+  cursor: nesw-resize;
+}
+
+.resize-handle.sw {
+  bottom: -4px;
+  left: -4px;
+  cursor: nesw-resize;
+}
+
+/* Every corner wears a small bracket opening toward its own corner — the
+   resting hint that there is something to grab there at all. */
+.resize-handle.nw::after,
+.resize-handle.ne::after,
+.resize-handle.sw::after,
+.resize-handle.se::after {
+  content: "";
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  opacity: 0.6;
+  transition: opacity 200ms var(--ease-1), border-color 200ms var(--ease-1),
+    width 200ms var(--ease-1), height 200ms var(--ease-1),
+    box-shadow 200ms var(--ease-1);
+}
+
+.resize-handle.nw::after {
+  top: 5px;
+  left: 5px;
+  border-top: 1px solid var(--rule-strong);
+  border-left: 1px solid var(--rule-strong);
+}
+
+.resize-handle.ne::after {
+  top: 5px;
+  right: 5px;
+  border-top: 1px solid var(--rule-strong);
+  border-right: 1px solid var(--rule-strong);
+}
+
+.resize-handle.sw::after {
+  bottom: 5px;
+  left: 5px;
+  border-bottom: 1px solid var(--rule-strong);
+  border-left: 1px solid var(--rule-strong);
+}
+
+.resize-handle.se::after {
+  bottom: 5px;
+  right: 5px;
+  border-bottom: 1px solid var(--rule-strong);
+  border-right: 1px solid var(--rule-strong);
+}
+
+/* Edge glow: the webOS pointer never changes shape over a resize edge (no
+   ns-/ew-resize cursors like a desktop), so the window itself has to say
+   "you can grab here" — an accent line grows out of the hovered edge with a
+   soft glow, and stays lit for the whole drag via the .dragging class. */
+.resize-handle::before {
+  content: "";
+  position: absolute;
+  background: var(--accent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms var(--ease-1), transform 200ms var(--ease-1),
+    box-shadow 200ms var(--ease-1);
+}
+
+.resize-handle.n::before {
+  left: 0;
+  right: 0;
+  top: 3px;
+  height: 3px;
+  transform: scaleY(0.25);
+  transform-origin: top;
+}
+
+.resize-handle.w::before {
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 3px;
+  transform: scaleX(0.25);
+  transform-origin: left;
+}
+
+.resize-handle.s::before {
+  left: 0;
+  right: 0;
+  bottom: 3px;
+  height: 3px;
+  transform: scaleY(0.25);
+  transform-origin: bottom;
+}
+
+.resize-handle.e::before {
+  top: 0;
+  bottom: 0;
+  right: 3px;
+  width: 3px;
+  transform: scaleX(0.25);
+  transform-origin: right;
+}
+
+.resize-handle.n:hover::before,
+.resize-handle.n.dragging::before,
+.resize-handle.n.edge-lit::before {
+  opacity: 1;
+  transform: scaleY(1);
+  box-shadow: 0 2px 14px rgba(var(--accent-rgb), 0.55);
+}
+
+.resize-handle.w:hover::before,
+.resize-handle.w.dragging::before,
+.resize-handle.w.edge-lit::before {
+  opacity: 1;
+  transform: scaleX(1);
+  box-shadow: 2px 0 14px rgba(var(--accent-rgb), 0.55);
+}
+
+.resize-handle.s:hover::before,
+.resize-handle.s.dragging::before,
+.resize-handle.s.edge-lit::before {
+  opacity: 1;
+  transform: scaleY(1);
+  box-shadow: 0 -2px 14px rgba(var(--accent-rgb), 0.55);
+}
+
+.resize-handle.e:hover::before,
+.resize-handle.e.dragging::before,
+.resize-handle.e.edge-lit::before {
+  opacity: 1;
+  transform: scaleX(1);
+  box-shadow: -2px 0 14px rgba(var(--accent-rgb), 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .resize-handle::before,
+  .resize-handle.nw::after,
+  .resize-handle.ne::after,
+  .resize-handle.sw::after,
+  .resize-handle.se::after,
+  .resize-readout {
+    transition: none;
+  }
+}
+
+.resize-handle:hover,
+.resize-handle.dragging {
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.resize-handle.nw:hover::after,
+.resize-handle.nw.dragging::after {
+  border-color: var(--accent);
+  opacity: 1;
+  width: 12px;
+  height: 12px;
+  border-top-width: 2px;
+  border-left-width: 2px;
+  box-shadow: -2px -2px 14px rgba(var(--accent-rgb), 0.55);
+}
+
+.resize-handle.se:hover::after,
+.resize-handle.se.dragging::after {
+  border-color: var(--accent);
+  opacity: 1;
+  width: 12px;
+  height: 12px;
+  border-bottom-width: 2px;
+  border-right-width: 2px;
+  box-shadow: 2px 2px 14px rgba(var(--accent-rgb), 0.55);
+}
+
+.resize-handle.ne:hover::after,
+.resize-handle.ne.dragging::after {
+  border-color: var(--accent);
+  opacity: 1;
+  width: 12px;
+  height: 12px;
+  border-top-width: 2px;
+  border-right-width: 2px;
+  box-shadow: 2px -2px 14px rgba(var(--accent-rgb), 0.55);
+}
+
+.resize-handle.sw:hover::after,
+.resize-handle.sw.dragging::after {
+  border-color: var(--accent);
+  opacity: 1;
+  width: 12px;
+  height: 12px;
+  border-bottom-width: 2px;
+  border-left-width: 2px;
+  box-shadow: -2px 2px 14px rgba(var(--accent-rgb), 0.55);
+}
+
+body.term-resizing,
+body.term-resizing * {
+  cursor: inherit !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+/* While a resize drag runs, the whole frame confirms it: a thin accent ring
+   on top of the resting shadow. Resize only — a window MOVE keeps the resting
+   look, because there the frame follows the pointer and needs no telling. */
+body.term-resizing .term-wrapper {
+  box-shadow:
+    0 0 0 1px rgba(var(--accent-rgb), 0.45),
+    0 0 22px rgba(var(--accent-rgb), 0.2),
+    var(--shadow);
+}
+
+/* Live grid readout during a resize drag: cols x rows, centred, out of the
+   pointer's way (pointer-events: none) and above frame + files view. Shown
+   via .visible for the drag plus a beat after release, then faded. */
+.resize-readout {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 8px 18px;
+  background: rgba(var(--panel-bg-rgb), 0.82);
+  border: 1px solid rgba(var(--accent-rgb), 0.55);
+  border-radius: 6px;
+  color: var(--accent);
+  font-size: 26px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 6;
+  transition: opacity 180ms var(--ease-1);
+}
+
+.resize-readout.visible {
+  opacity: 1;
+}
+
+.term-frame .xterm {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Pwntastic Terminal Mono", var(--font-mono) !important;
+}
+
+.term-frame .xterm * {
+  font-family: "Pwntastic Terminal Mono", var(--font-mono) !important;
+}
+
+.term-frame .xterm-viewport,
+.term-frame .xterm-screen {
+  background-color: transparent !important;
+}
+
+/* xterm forces overflow-y:scroll on the viewport, which paints an always-on
+   native scrollbar (ugly white gutter on webOS). Hide it entirely — wheel and
+   keyboard scrolling still work. */
+.term-frame .xterm-viewport {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.term-frame .xterm-viewport::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+.term-frame .xterm-screen {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.term-frame .xterm-helper-textarea {
+  pointer-events: none;
+}
+
+/* Non-editable focus target for the terminal. It only needs to be focusable
+   (tabindex=-1) so USB keypress events have a home inside the frame; it is
+   deliberately NOT contenteditable, which is what keeps the webOS system OSK
+   from popping. Kept tiny and transparent so it never paints; pointer-events:
+   none lets mouse events pass through to xterm beneath. */
+.term-frame .input-sink {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  outline: none;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* The OSK proxy (terminal.js): a REAL textarea, because a focused editable
+   element is the only thing that raises the webOS system keyboard. It is
+   invisible but NOT display:none and NOT zero-sized — a collapsed or hidden
+   editable is where the IME stops delivering composition events, and the whole
+   point of this element is to receive them. So it is laid out over the bottom
+   line of the terminal at full width, painted with nothing, and kept out of
+   the pointer and tab orders (tabindex="-1" in the markup) so it can only ever
+   be focused by the OSK toggle. */
+.term-frame .osk-proxy {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 2em;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  resize: none;
+  opacity: 0;
+  outline: none;
+  pointer-events: none;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  font: inherit;
+  z-index: 3;
+}
+
+/* ---------- Connect form ---------- */
+
+/* A full-height console panel down the right edge, not a card floating in the
+   middle of it. The old rule centred a fit-content box between the two 42px
+   margins, which was honest about the panel's height but left 213px of dead
+   air above it and 213px below on 1080p — the form read as squeezed into a
+   third of a screen it had all of.
+
+   Now the panel spans the band and lays its blocks out as a column: identity
+   at the top, one section per question the form asks, destination and actions
+   at the bottom, and an elastic seam at every joint between them (see .seam).
+   The blocks keep their natural height and the seams absorb the difference, so
+   the panel is full at any content height without a single magic number.
+
+   Blocks are flex: 0 0 auto on purpose. A flex column shrinks its items by
+   default, so without that a tall configuration would compress the rows into
+   each other rather than take the space out of the seams. */
+.connect-form {
+  position: absolute;
+  right: 42px;
+  top: 42px;
+  bottom: 42px;
+  width: min(520px, calc(100vw - 84px));
+  max-width: 520px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 46px 44px 40px;
+  box-sizing: border-box;
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  animation: card-in var(--dur-2) var(--ease-1) both;
+}
+
+.connect-form > * {
+  flex: 0 0 auto;
+}
+
+/* The seams are the layout. Each is an empty flex spacer that grows to share
+   whatever height the blocks leave over — equal grow factors, so the air lands
+   in four even joints rather than one hole — and, just as importantly, shrinks
+   back towards nothing when the panel fills up.
+
+   Both directions are needed. Publickey auth with two live sessions listed is
+   ~150px taller than the same form with a password and none, and a seam that
+   could only grow would put that configuration behind a scrollbar while three
+   30px gaps sat there refusing to give any of it back. `min-height: 0` is what
+   permits the shrink; the blocks themselves stay flex: 0 0 auto so the space
+   always comes out of the joints and never out of a field. */
+.connect-form > .seam {
+  flex: 1 1 30px;
+  min-height: 0;
+}
+
+.connect-form > .seam[hidden] {
+  display: none;
+}
+
+.connect-form::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 44px;
+  width: 56px;
+  height: 1px;
+  background: var(--accent);
+  opacity: 0.65;
+}
+
+.connect-form .brand {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 6px;
+}
+
+.connect-form .brand-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.connect-form h1 {
+  font-family: var(--font-wordmark);
+  font-weight: 400;
+  font-size: 46px;
+  line-height: 0.9;
+  letter-spacing: 0;
+  margin: 0;
+  color: var(--text-1);
+}
+
+.connect-form h1 b {
+  color: var(--accent);
+  font-weight: 400;
+}
+
+.connect-form .brand-version {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--text-3);
+}
+
+.connect-form .brand-rule {
+  width: 28px;
+  height: 1px;
+  background: var(--accent);
+  margin: 10px 0 12px;
+  opacity: 0.7;
+}
+
+/* The seam below the head owns the gap to the form, so the tagline no longer
+   carries one of its own. */
+.connect-form .tagline {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text-2);
+  margin: 0;
+}
+
+/* Sections. "Target" and "Credentials" are the two questions this form asks —
+   where, and as whom — and naming them is the difference between a column of
+   eight equal rows and a form with a shape. The eyebrow + hairline is the
+   vocabulary the wordmark rule already established, so the device costs no new
+   visual language; the rule runs to the panel edge, or to the switch that
+   belongs to that section (see .auth-segments below). */
+.connect-form .section-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.connect-form .section-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.connect-form .section-rule {
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--rule);
+}
+
+.connect-form .field {
+  margin-bottom: 22px;
+}
+
+/* Nothing trails the last field of a section — the gap below it is the seam's
+   to give, and a field margin on top of that would put the joints out of
+   step with each other. */
+.connect-form .section > .field:last-child,
+.connect-form .auth-fields > .field:last-child {
+  margin-bottom: 0;
+}
+
+/* Two fields on one line where they are one thought: Host/Port, and Key with
+   its Manage keys button. The panel is 432px wide inside its padding, enough
+   for both halves without either becoming a stub. User sits on its own line —
+   it used to share one with the auth switch, which now lives in the
+   Credentials section header instead. */
+.connect-form .field-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+}
+
+.connect-form .field-row > .field {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.connect-form .field-row > .field-wide {
+  flex: 3 1 0;
+}
+
+.connect-form .field-row > .field-narrow {
+  flex: 0 0 92px;
+}
+
+/* Manage keys sits on the Key row rather than under it, aligned to the input
+   and not to the label above it. */
+.connect-form .field-row > #manage-keys-btn {
+  flex: 0 0 auto;
+  /* Beats the base rule's align-self: flex-start, so it sits on the input's
+     baseline rather than the label's. */
+  align-self: flex-end;
+  margin-bottom: 22px;
+}
+
+.connect-form .field-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  margin-bottom: 9px;
+}
+
+.connect-form .fake-input {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  box-sizing: border-box;
+  padding: 5px 0 9px;
+  margin: 0;
+  background: transparent;
+  color: var(--text-1);
+  border: 0;
+  border-bottom: 1px solid var(--rule-strong);
+  font-family: var(--font-mono);
+  /* Read from a couch, not from a desk. 19px mono still fits ~37 characters
+     across the panel's 432px of content width, and renderTextField() scrolls
+     the field for anything longer. */
+  font-size: 19px;
+  line-height: 26px;
+  white-space: pre;
+  overflow: hidden;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: border-color var(--dur-1) var(--ease-1),
+              box-shadow var(--dur-1) var(--ease-1),
+              color var(--dur-1) var(--ease-1);
+}
+
+.connect-form .fake-input:focus {
+  outline: none;
+  border-bottom-color: var(--accent);
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
+.connect-form .fake-placeholder {
+  color: var(--text-3);
+}
+
+.connect-form .fake-select {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.connect-form .fake-select::after {
+  /* A chevron, not U+21BB — that one has no glyph on this firmware and came out
+     as the .notdef box. This is a picker, so a picker's affordance. */
+  content: "▾";
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: 16px;
+}
+
+.connect-form .fake-select .key-name {
+  color: var(--text-1);
+}
+
+.connect-form .fake-select .key-kind {
+  color: var(--text-3);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.connect-form .fake-caret {
+  display: inline-block;
+  /* One cell of the 19px mono face, so the caret sits in the text run rather
+     than beside it. */
+  width: 11px;
+  height: 22px;
+  margin-bottom: -5px;
+  background: var(--accent);
+  animation: caret-blink 1.1s steps(2, start) infinite;
+}
+
+/* Auth segmented toggle.
+
+   It lives in the Credentials section header, on the far side of that
+   section's rule, because it switches what the section contains — the two
+   words and the fields under them are one control and its consequence. Putting
+   it there also bought back the row it used to occupy beside User, which is
+   what let User run full width. */
+
+.connect-form .auth-segments {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 2px 0;
+  transition: color var(--dur-1) var(--ease-1);
+}
+
+/* A ring rather than the inputs' underline: this is not sitting on a field
+   baseline any more, and the ring is the same focus signal the buttons use. */
+.connect-form .auth-segments:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 5px;
+}
+
+.connect-form .auth-segment {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+  padding: 2px 0;
+  transition: color var(--dur-1) var(--ease-1);
+}
+
+.connect-form .auth-segment.active {
+  color: var(--accent);
+}
+
+.connect-form .auth-divider {
+  color: var(--text-3);
+  font-size: 12px;
+  margin: 0 -6px;
+}
+
+.connect-form .auth-fields[hidden] {
+  display: none;
+}
+
+/* Destination preview */
+
+/* First row of the foot, so it needs no top margin of its own — the gap above
+   it is the seam's. */
+.connect-form .destination {
+  margin: 0 0 20px;
+  padding: 16px 18px;
+  background: var(--ink-2);
+  border-left: 2px solid var(--accent);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  color: var(--text-2);
+  letter-spacing: 0.01em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 22px;
+}
+
+.connect-form .destination .dest-prompt {
+  color: var(--accent-dim);
+}
+
+.connect-form .destination .dest-target {
+  color: var(--text-1);
+}
+
+.connect-form .destination .dest-pulse {
+  display: inline-block;
+  width: 9px;
+  height: 18px;
+  background: var(--accent);
+  margin-left: 2px;
+  animation: caret-blink 1.4s steps(2, start) infinite;
+}
+
+.connect-form .destination.idle .dest-target {
+  color: var(--text-3);
+}
+
+.connect-form .destination.idle .dest-pulse {
+  display: none;
+}
+
+/* Buttons */
+
+/* The form has to fit 1080p without scrolling, and the tall case is not the
+   one on screen most of the time: publickey auth adds two more fields, and the
+   Debug button only exists while debugging is on. With every row full-width
+   that configuration ran 227px past the panel's height. Pairing the short
+   fields and putting the actions on two lines instead of four buys it back —
+   see .field-row above for the other half. */
+.connect-form .actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.connect-form .action-row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+/* Connect takes the rest of the line beside the SSH/SCP pair; Debug and Hide
+   split theirs evenly. */
+.connect-form .action-row > button {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.connect-form button {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease-1),
+              color var(--dur-1) var(--ease-1),
+              filter var(--dur-1) var(--ease-1);
+}
+
+.connect-form button:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.connect-form #connect-btn {
+  width: 100%;
+  padding: 18px 20px;
+  background: var(--accent);
+  color: var(--ink-0);
+  border: 0;
+  font-weight: 400;
+}
+
+.connect-form #connect-btn::before {
+  content: "▸  ";
+}
+
+.connect-form #connect-btn:hover {
+  filter: brightness(1.06);
+}
+
+/* The three minor actions share one outlined treatment. #local-btn was left
+   out of this rule when it arrived in 0.7.0 and fell through to the browser's
+   default button chrome — a filled grey slab beside two hairline outlines,
+   which read as the primary action on the row it is least of. */
+.connect-form #local-btn,
+.connect-form #debug-btn,
+.connect-form #hide-btn {
+  width: 100%;
+  padding: 12px 18px;
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid var(--rule-strong);
+  font-size: 12px;
+}
+
+.connect-form #local-btn:hover,
+.connect-form #local-btn:focus,
+.connect-form #debug-btn:hover,
+.connect-form #debug-btn:focus,
+.connect-form #hide-btn:hover,
+.connect-form #hide-btn:focus {
+  color: var(--text-1);
+  border-color: var(--accent);
+}
+
+.connect-form #manage-keys-btn {
+  align-self: flex-start;
+  padding: 6px 0;
+  background: transparent;
+  color: var(--text-2);
+  border: 0;
+  border-bottom: 1px solid transparent;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+}
+
+.connect-form #manage-keys-btn:hover,
+.connect-form #manage-keys-btn:focus {
+  color: var(--text-1);
+  border-bottom-color: var(--accent);
+}
+
+/* Caps Lock badge. Anchored to the label row of the masked fields and taken
+   out of flow, so it can appear mid-typing without nudging the Connect button
+   under the user's cursor. It deliberately reuses the badge vocabulary already
+   established by .theme-chip — mono, uppercase, wide tracking, hairline border
+   — instead of introducing a second visual language, and signals through form
+   (dot + frame + fill) as well as hue, so it still reads on the amber theme. */
+.connect-form .field-secret {
+  position: relative;
+}
+
+.connect-form .caps-warn {
+  position: absolute;
+  /* On the input row, not the label row: "Passphrase (only if not stored with
+     the key)" already runs ~370px of the 432px content width, so a badge
+     beside it would collide. Sitting at the end of the entry line is also the
+     familiar place for this indicator. */
+  bottom: 7px;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 9px;
+  border: 1px solid var(--warn-line);
+  color: var(--warn);
+  /* Opaque, so a long secret runs behind the badge instead of through it. */
+  background-color: var(--panel-bg-strong);
+  background-image: linear-gradient(0deg, var(--warn-fill), var(--warn-fill));
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: caps-warn-in var(--dur-1) var(--ease-1) both;
+}
+
+.connect-form .caps-warn[hidden] {
+  display: none;
+}
+
+/* Drawn, not typed: a glyph here would risk tofu on a firmware whose fallback
+   fonts lack it, and the bundled mono is not guaranteed to carry U+21EA. */
+.connect-form .caps-warn .caps-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 7px var(--warn-line);
+}
+
+@keyframes caps-warn-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Host-key mismatch recovery. Alarm-coloured rather than --warn: unlike a
+   stuck Caps Lock this may genuinely mean someone is intercepting the
+   connection, and clearing the pin is the one destructive action on this
+   screen. */
+.connect-form .hostkey-warn {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--alarm);
+  background: var(--panel-bg-strong);
+  text-align: left;
+}
+
+.connect-form .hostkey-warn[hidden] {
+  display: none;
+}
+
+.connect-form .hostkey-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--alarm);
+}
+
+.connect-form .hostkey-title .caps-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--alarm);
+  box-shadow: 0 0 7px var(--alarm);
+}
+
+.connect-form .hostkey-detail {
+  margin: 0 0 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.connect-form .hostkey-warn button {
+  min-height: 30px;
+  padding: 0 14px;
+  background: transparent;
+  border: 1px solid var(--alarm);
+  color: var(--alarm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.connect-form .hostkey-warn button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.connect-form .form-error {
+  margin: 12px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--alarm);
+}
+
+.connect-form .form-error[hidden] {
+  display: none;
+}
+
+.connect-form .hint {
+  margin-top: 20px;
+  margin-bottom: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  text-align: left;
+}
+
+.connect-form .hint kbd {
+  font: inherit;
+  color: var(--text-2);
+  border: 1px solid var(--rule-strong);
+  padding: 1px 6px;
+  margin: 0 2px;
+}
+
+/* Stagger reveal. Five blocks now rather than fourteen loose rows, so the
+   entrance is a block cascade with a longer beat instead of a ripple. The
+   seams sit on the even children and stay out of it — an empty spacer has
+   nothing to reveal. */
+
+.connect-form > *:not(.seam) {
+  animation: row-in var(--dur-2) var(--ease-1) both;
+}
+
+.connect-form > *:nth-child(1) { animation-delay: 40ms; }
+.connect-form > *:nth-child(3) { animation-delay: 100ms; }
+.connect-form > *:nth-child(5) { animation-delay: 160ms; }
+.connect-form > *:nth-child(7) { animation-delay: 220ms; }
+.connect-form > *:nth-child(9) { animation-delay: 280ms; }
+
+/* ---------- Keys page ---------- */
+
+.keys-page {
+  position: absolute;
+  right: 42px;
+  top: 42px;
+  width: min(760px, calc(100vw - 84px));
+  max-width: 760px;
+  max-height: calc(100vh - 84px);
+  overflow: auto;
+  margin: 0;
+  padding: 44px 44px 40px;
+  box-sizing: border-box;
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow);
+  color: var(--text-1);
+  backdrop-filter: blur(10px);
+  animation: card-in var(--dur-2) var(--ease-1) both;
+}
+
+.keys-page::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 44px;
+  width: 56px;
+  height: 1px;
+  background: var(--accent);
+  opacity: 0.65;
+}
+
+.keys-page .page-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 28px;
+}
+
+.keys-page h1 {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 36px;
+  line-height: 1;
+  letter-spacing: 0;
+  margin: 0;
+  color: var(--text-1);
+}
+
+/* ---------- Overlay close fallback ---------- */
+
+.overlay-message {
+  position: absolute;
+  right: 42px;
+  top: 42px;
+  width: min(520px, calc(100vw - 84px));
+  box-sizing: border-box;
+  padding: 32px 36px;
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.overlay-message h1 {
+  margin: 0 0 14px;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.overlay-message p {
+  margin: 0 0 22px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.overlay-message button {
+  padding: 12px 18px;
+  background: var(--accent);
+  border: 0;
+  color: var(--ink-0);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ---------- Debug panel ---------- */
+
+.debug-panel {
+  position: absolute;
+  left: 42px;
+  top: 42px;
+  width: min(860px, calc(100vw - 84px));
+  max-height: calc(100vh - 84px);
+  box-sizing: border-box;
+  padding: 24px 26px;
+  background: rgba(7, 9, 12, 0.94);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  z-index: 5;
+}
+
+.debug-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 12px;
+}
+
+.debug-header h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.debug-meta {
+  margin: 0 0 12px;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-all;
+}
+
+.debug-log-text {
+  display: block;
+  width: 100%;
+  height: min(560px, calc(100vh - 220px));
+  min-height: 260px;
+  box-sizing: border-box;
+  padding: 14px;
+  background: rgba(0, 0, 0, 0.38);
+  color: var(--text-1);
+  border: 1px solid var(--rule-strong);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  resize: none;
+  white-space: pre;
+}
+
+.debug-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.debug-panel button {
+  padding: 9px 14px;
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid var(--rule-strong);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.debug-panel button:hover,
+.debug-panel button:focus {
+  color: var(--text-1);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.keys-page #back-btn {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 4px 0;
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease-1),
+              border-color var(--dur-1) var(--ease-1);
+}
+
+.keys-page #back-btn::before {
+  content: "‹  ";
+}
+
+.keys-page #back-btn:hover,
+.keys-page #back-btn:focus {
+  color: var(--text-1);
+  border-bottom-color: var(--accent);
+  outline: none;
+}
+
+.keys-page section {
+  margin-top: 28px;
+}
+
+.keys-page section + section {
+  margin-top: 36px;
+}
+
+.keys-page h2 {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 400;
+  color: var(--text-2);
+  margin: 0 0 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.keys-list-wrapper em {
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.keys-list-wrapper em.error {
+  color: var(--alarm);
+}
+
+.keys-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.keys-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  margin-bottom: 8px;
+  position: relative;
+}
+
+.keys-list li::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.5);
+}
+
+.keys-list .key-label {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--text-1);
+  margin-right: 12px;
+}
+
+.keys-list .key-type {
+  font-family: var(--font-mono);
+  color: var(--text-3);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.keys-list button {
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease-1),
+              border-color var(--dur-1) var(--ease-1),
+              background-color var(--dur-1) var(--ease-1);
+}
+
+.keys-list button:hover,
+.keys-list button:focus {
+  color: var(--alarm);
+  border-color: var(--alarm);
+  outline: none;
+}
+
+.keys-list .key-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.keys-list button.danger {
+  color: var(--alarm);
+  border-color: var(--alarm);
+}
+
+.keys-page form label {
+  display: block;
+  margin-bottom: 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.keys-page form input,
+.keys-page form textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  margin-top: 8px;
+  background: var(--ink-2);
+  color: var(--text-1);
+  border: 1px solid var(--rule);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+  transition: border-color var(--dur-1) var(--ease-1),
+              box-shadow var(--dur-1) var(--ease-1);
+}
+
+.keys-page form input:focus,
+.keys-page form textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.keys-page form textarea {
+  resize: vertical;
+  min-height: 160px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.keys-page form button[type="submit"] {
+  margin-top: 4px;
+  padding: 14px 24px;
+  background: var(--accent);
+  border: 0;
+  color: var(--ink-0);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: filter var(--dur-1) var(--ease-1);
+}
+
+.keys-page form button[type="submit"]::before {
+  content: "+  ";
+}
+
+.keys-page form button[type="submit"]:hover {
+  filter: brightness(1.06);
+}
+
+.keys-page form button[type="submit"]:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.keys-page .hint {
+  margin-top: 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-2);
+  letter-spacing: 0.04em;
+}
+
+.keys-page .hint.error,
+.keys-page .error {
+  color: var(--alarm);
+}
+
+/* ---------- Animations ---------- */
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes row-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes caret-blink {
+  0%, 50%   { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connect-form,
+  .keys-page,
+  .connect-form > * {
+    animation: none !important;
+  }
+  .fake-caret,
+  .connect-form .caps-warn,
+  .destination .dest-pulse {
+    animation: none !important;
+  }
+  .connect-form .fake-input,
+  .connect-form .auth-segments,
+  .connect-form button,
+  .keys-page form input,
+  .keys-page form textarea,
+  .keys-page form button[type="submit"],
+  .keys-list button,
+  .keys-page #back-btn {
+    transition: none !important;
+  }
+}
+
+/* ============================================================
+   Theme switcher
+   Each theme overrides the design tokens on body[data-theme]
+   (palette + type roles) and adds one signature flourish to the
+   login panel. The terminal chrome inherits the tokens; the xterm
+   shell palette is applied from JS (see themes.mjs).
+   The first theme (phosphor) is the :root default — no block needed.
+   ============================================================ */
+
+/* Theme switch controls */
+.connect-form .brand-meta .theme-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 22px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease-1),
+              border-color var(--dur-1) var(--ease-1);
+}
+.connect-form .brand-meta .theme-chip:hover,
+.connect-form .brand-meta .theme-chip:focus {
+  outline: none;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.connect-form .brand-meta .theme-chip .theme-name {
+  letter-spacing: 0.04em;
+}
+.term-toolbar .theme-btn {
+  font-size: 15px;
+}
+
+/* Panel-opacity slider. The thumb is a filled block — the terminal's own
+   cursor shape — and the ramp glyph (░▒▓█) beside it tracks the value, so
+   the control explains itself without a label. */
+.term-toolbar .opacity-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+}
+
+.term-toolbar .opacity-glyph {
+  width: 16px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.term-toolbar .opacity-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 108px;
+  height: 30px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.term-toolbar .opacity-slider:focus {
+  outline: none;
+}
+
+.term-toolbar .opacity-slider::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--rule-strong);
+}
+
+.term-toolbar .opacity-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 22px;
+  margin-top: -10px;
+  background: var(--accent-dim);
+  border: 1px solid transparent;
+  transition: background 120ms var(--ease-1);
+}
+
+.term-toolbar .opacity-slider:hover::-webkit-slider-thumb,
+.term-toolbar .opacity-slider:focus::-webkit-slider-thumb {
+  background: var(--accent);
+}
+
+/* ---------- Backdrop-reaction popover (long-press on the theme button) ---- */
+/* Positioned by JS against the theme button at open time; z above the
+   scrollback-search overlay (30). Slider styling mirrors the toolbar's
+   opacity slider so the two read as one family of controls. */
+/* One column: the on/off pill, then a labelled row per slider (loudness,
+   smoothing). It was a single row while there was one slider; the rows keep the
+   popover narrow enough to sit under the theme button at any window width. */
+.term-wrapper .flash-pop {
+  position: absolute;
+  z-index: 40;
+  display: none;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.term-wrapper .flash-pop.open {
+  display: flex;
+}
+
+/* The on/off toggle, which also names the active theme's variant of the effect
+   ("bloom", "ember", "cyanotype", "neon", "chameleon"). Styled as a pill rather
+   than as a checkbox: it is the one control here that changes state on a single
+   press, and on a remote it has to be a target, not a tick box. */
+.flash-pop .flash-toggle {
+  display: flex;
+  align-items: baseline;
+  /* Full width now that the popover is a column: the variant name sits over the
+     labels, its state over the readouts. */
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 9px;
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    border-color 120ms var(--ease-1),
+    color 120ms var(--ease-1);
+}
+
+.flash-pop .flash-toggle .flash-name {
+  letter-spacing: 0.04em;
+}
+
+/* The state word carries the colour, so on/off is legible at a glance from the
+   couch without reading the label at all. */
+.flash-pop .flash-toggle .flash-state {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  opacity: 0.75;
+}
+
+.flash-pop .flash-toggle.on {
+  border-color: var(--accent-dim);
+  color: var(--text-2);
+}
+
+.flash-pop .flash-toggle.on .flash-state {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.flash-pop .flash-toggle:hover,
+.flash-pop .flash-toggle:focus {
+  border-color: var(--accent);
+  color: var(--text-1);
+  outline: none;
+}
+
+.flash-pop .flash-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Named, not iconographic: the bundled fonts guarantee very few glyphs (see the
+   tofu note in the platform gotchas), and two unlabelled sliders in one popover
+   are a guessing game. */
+.flash-pop .flash-label {
+  min-width: 52px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  pointer-events: none;
+}
+
+/* Off: the sliders still work (they set what the next switch-on gets), they
+   just have nothing to show right now. */
+.flash-pop.off .flash-slider,
+.flash-pop.off .flash-label,
+.flash-pop.off .flash-readout {
+  opacity: 0.4;
+}
+
+.flash-pop .flash-readout {
+  min-width: 42px;
+  text-align: right;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.flash-pop .flash-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 168px;
+  height: 30px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.flash-pop .flash-slider:focus {
+  outline: none;
+}
+
+.flash-pop .flash-slider::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--rule-strong);
+}
+
+.flash-pop .flash-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 22px;
+  margin-top: -10px;
+  background: var(--accent-dim);
+  border: 1px solid transparent;
+  transition: background 120ms var(--ease-1);
+}
+
+.flash-pop .flash-slider:hover::-webkit-slider-thumb,
+.flash-pop .flash-slider:focus::-webkit-slider-thumb {
+  background: var(--accent);
+}
+
+/* ---------- Amber CRT ---------- */
+body[data-theme="amber"] {
+  --ink-0: #090603;
+  --ink-1: #100a03;
+  --ink-2: #1c1105;
+  --rule: rgba(255, 176, 0, 0.14);
+  --rule-strong: rgba(255, 176, 0, 0.30);
+  --text-1: #ffdca8;
+  --text-2: #cf9744;
+  --text-3: #9e7533;
+  --accent: #ffb000;
+  --accent-rgb: 255, 176, 0;
+  --accent-dim: #b87900;
+  --panel-bg-rgb: 13, 9, 4;
+  --panel-bg-strong: rgba(20, 13, 4, 0.94);
+  --panel-border: rgba(255, 176, 0, 0.30);
+  --font-display: var(--font-mono);
+  /* The one theme that cannot warn in yellow: amber IS the theme colour, so a
+     gold badge would read as ordinary chrome. Falls back to this palette's
+     muted red-orange, which still comes from themes.mjs. */
+  --warn: #d4756a;
+  --warn-line: rgba(212, 117, 106, 0.45);
+  --warn-fill: rgba(212, 117, 106, 0.14);
+}
+body[data-theme="amber"] .connect-form h1 {
+  color: var(--text-1);
+  text-shadow: 0 0 14px rgba(255, 176, 0, 0.30);
+}
+/* Signature: phosphor scanlines drifting over the panel. */
+body[data-theme="amber"] .connect-form::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(255, 176, 0, 0.06) 0px,
+    rgba(255, 176, 0, 0.06) 1px,
+    transparent 2px,
+    transparent 4px
+  );
+  mix-blend-mode: screen;
+  opacity: 0.7;
+}
+
+/* ---------- Blueprint ---------- */
+body[data-theme="blueprint"] {
+  --ink-0: #030b15;
+  --ink-1: #051320;
+  --ink-2: #081c30;
+  --rule: rgba(120, 180, 255, 0.18);
+  --rule-strong: rgba(120, 180, 255, 0.34);
+  --text-1: #e2eefc;
+  --text-2: #93b6dd;
+  --text-3: #6187a7;
+  --accent: #6fb7ff;
+  --accent-rgb: 111, 183, 255;
+  --accent-dim: #3f7fc0;
+  --panel-bg-rgb: 6, 22, 40;
+  --panel-bg-strong: rgba(7, 26, 46, 0.94);
+  --panel-border: rgba(120, 180, 255, 0.34);
+  --warn: #d6c190;
+  --warn-line: rgba(214, 193, 144, 0.42);
+  --warn-fill: rgba(214, 193, 144, 0.12);
+}
+body[data-theme="blueprint"] .connect-form h1 {
+  letter-spacing: 0.02em;
+}
+/* Signature: faint draughtsman's graph paper. */
+body[data-theme="blueprint"] .connect-form::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(120, 180, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 180, 255, 0.07) 1px, transparent 1px);
+  background-size: 26px 26px;
+  opacity: 0.9;
+}
+
+/* ---------- Synthwave ---------- */
+body[data-theme="synthwave"] {
+  --ink-0: #050112;
+  --ink-1: #080318;
+  --ink-2: #110827;
+  --rule: rgba(180, 120, 255, 0.18);
+  --rule-strong: rgba(255, 95, 214, 0.32);
+  --text-1: #f0e2ff;
+  --text-2: #b79be0;
+  --text-3: #866eb0;
+  --accent: #ff5fd6;
+  --accent-rgb: 255, 95, 214;
+  --accent-dim: #b83fb0;
+  --panel-bg-rgb: 9, 3, 26;
+  --panel-bg-strong: rgba(11, 4, 32, 0.94);
+  --panel-border: rgba(255, 95, 214, 0.34);
+  --warn: #dccb8c;
+  --warn-line: rgba(220, 203, 140, 0.42);
+  --warn-fill: rgba(220, 203, 140, 0.12);
+}
+/* Signature: iridescent foil wordmark + neon edge. */
+body[data-theme="synthwave"] .connect-form h1 {
+  background: linear-gradient(92deg, #ff5fd6 0%, #b483ff 48%, #5ff3ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+body[data-theme="synthwave"] .connect-form h1 b {
+  -webkit-text-fill-color: transparent;
+}
+body[data-theme="synthwave"] .connect-form::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, #ff5fd6, #5ff3ff, transparent);
+  opacity: 0.6;
+}
+
+/* ---------- Chameleon ---------- */
+/* Deliberately colourless chrome: graphite panel, silver accent. The colour
+   comes from the video behind the app — main.js live-overrides the shell
+   foreground (and the wrapper's --accent) with the complementary colour of
+   the sampled backdrop while this theme is active. */
+body[data-theme="chameleon"] {
+  --ink-0: #060708;
+  --ink-1: #0a0b0d;
+  --ink-2: #14161a;
+  --rule: rgba(220, 228, 232, 0.14);
+  --rule-strong: rgba(220, 228, 232, 0.24);
+  --text-1: #e6e9ea;
+  --text-2: #a2abaf;
+  --text-3: #737d82;
+  --accent: #c0c8cc;
+  --accent-rgb: 192, 200, 204;
+  --accent-dim: #828c91;
+  --panel-bg-rgb: 10, 11, 13;
+  --panel-bg-strong: rgba(14, 16, 19, 0.94);
+  --panel-border: rgba(220, 228, 232, 0.26);
+  --warn: #c2ba8c;
+  --warn-line: rgba(194, 186, 140, 0.42);
+  --warn-fill: rgba(194, 186, 140, 0.12);
+}
+
+/* ---------- Chameleon: per-glyph ink ----------
+
+   Every letter takes a colour that contrasts with the picture *behind that
+   letter*, which one theme colour cannot express: half a line over a dark
+   suit and half over a sunlit wall needs two different answers at once.
+
+   The mechanism is one background image — a coarse map of solved ink colours,
+   built per backdrop frame in ink-field.mjs — painted onto the box that holds
+   the glyph rows and clipped to the text. The image is already cropped to that
+   box (ink-map.mjs), so it needs no positioning here and stays aligned through
+   drags, resizes and fullscreen with no geometry hooks at all. Cost is one
+   custom-property update per frame regardless of how much text is on screen,
+   and the resolution is per *pixel*: a glyph on the edge of a bright object
+   gets a gradient across itself rather than one flat compromise colour.
+
+   `color: transparent` is what turns the glyphs into the mask. It only reaches
+   text that has no colour of its own, because an element's own declaration
+   always beats an inherited one — so xterm's `.xterm-fg-N` classes and its
+   inline 24-bit foregrounds keep painting their ANSI colours over the map,
+   exactly as they should. !important is needed against the *inherited* rule
+   xterm injects on .xterm-rows itself, which it re-injects on every theme
+   change (so document order cannot be relied on — same argument as cell-bg). */
+/* background-image itself is written inline on this element per frame (see
+   setInkMap): as a custom property it would be inherited, and re-inheriting it
+   through every span on every frame was measurably expensive.
+
+   Keyed on the "image" value specifically, not on the attribute's presence: the
+   WebGL renderer carries the same effect without any of this (webgl-ink.mjs),
+   and `color: transparent` with no image to clip it to is a screen of invisible
+   text. That is not hypothetical — a lost GL context hands rendering back to a
+   freshly built DOM renderer mid-effect, and until the next solve arrives there
+   is nothing on the rows box at all. */
+.term-wrapper[data-chameleon-ink="image"] .xterm-rows {
+  /* Own compositor layer, and that is a performance decision, not a hint:
+     the veil animates background-color on the PARENT (.xterm-screen below),
+     and without this the parent's repaint re-rasterises this element's
+     text-clip painting — the most expensive raster in the app — at 60 fps
+     for the length of every veil transition. Promoted, the veil repaints a
+     flat colour quad and this layer only re-rasterises when the map image
+     itself changes. Costs one layer's worth of GPU memory for the rows box.
+
+     ONE image on the container, deliberately: a per-row-strip variant (one
+     background per row div, updated only where bytes moved) was built and
+     measured on the device — video moves the field GLOBALLY, so every strip
+     changed on every solve anyway, and the 40 separate images/invalidations
+     made presentation ~30x worse. Partial updates have nothing to grab here. */
+  will-change: background-image;
+  background-size: 100% 100%;
+  background-position: 0 0;
+  background-repeat: no-repeat;
+  /* Load-bearing, not a style choice: the map carries hard edges where the ink
+     flips between light and dark, and smoothing them back into a ramp puts
+     mid-grey glyphs on the mid-grey background at exactly that spot — measured
+     at 1.22:1 where the correct answer was 5.97:1. The encoder oversamples so
+     the blocks this leaves are half a character cell. */
+  image-rendering: pixelated;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent !important;
+}
+
+/* Both renderers, unlike the rules above: the veil is a background colour on
+   the box the glyphs sit in either way — under the rows on the DOM path, under
+   the canvas on the WebGL one — so it needs no renderer-specific handling at
+   all, only the attribute that says the effect is live. */
+/* The veil: the panel's own colour at ONE alpha for the whole window,
+   darkening the picture when its bright end is too bright for text to survive
+   on it (see ink-field.mjs — the per-tile version read as clouding and cost a
+   second full-screen raster per frame). It sits on the box behind the rows so
+   it is NOT clipped to the glyphs; the transition turns the feed's discrete
+   steps into a dimming that reads as deliberate. */
+.term-wrapper[data-chameleon-ink] .xterm-screen {
+  /* Long enough to hide the feed's discrete steps, short enough not to add
+     visible lag on top of the veil's own smoothing — and every ms of it is
+     also repaint time, because an animating background-color repaints the
+     box on each compositor frame. */
+  transition: background-color 120ms linear;
+}
+
+/* A glyph on a filled cell is not sitting on the picture — its own background
+   is between them — so it must not be painted from the map: the map would be
+   invisible under that background anyway, leaving the text unreadable. Both
+   ways a cell background can arrive are covered: xterm's indexed
+   `.xterm-bg-<N>` classes, and the inline 24-bit form, which is marked with an
+   attribute as the row factory writes it (see cell-bg.mjs on why an attribute
+   and not a class). Spans that carry their own foreground are excluded so this
+   cannot outrank an ANSI colour, and no !important is used here for the same
+   reason — inline 24-bit text has to keep winning. */
+.term-wrapper[data-chameleon-ink="image"] .xterm-rows span[class*="xterm-bg-"]:not([class*="xterm-fg-"]),
+.term-wrapper[data-chameleon-ink="image"] .xterm-rows span[data-cell-bg]:not([class*="xterm-fg-"]) {
+  color: var(--chameleon-flat-ink, #d8dcde);
+}
+
+/* ---------- Scrollback search (Ctrl+Shift+F) ---------- */
+
+/* Absolute overlay below the toolbar: opening it must not change the frame
+   height math or trigger a pty resize. */
+.term-search {
+  position: absolute;
+  top: 46px;
+  right: 12px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--rule-strong);
+}
+
+.term-search[hidden] {
+  display: none;
+}
+
+.term-search-glyph {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--accent);
+}
+
+.term-search-field {
+  min-width: 180px;
+  max-width: 320px;
+  min-height: 20px;
+  overflow: hidden;
+  white-space: pre;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-1);
+  border-bottom: 1px solid var(--rule-strong);
+  outline: none;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.term-search-field:focus {
+  border-bottom-color: var(--accent);
+}
+
+/* Block caret, same visual language as the connect form fields. Static on
+   purpose — this sits over live TV on an OLED. */
+.term-search-field:focus::after {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 15px;
+  margin-left: 1px;
+  vertical-align: -2px;
+  background: var(--accent);
+}
+
+.term-search-hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+
+/* ---------- End-of-session options (Reconnect / Login) ---------- */
+
+.term-endbar {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 56px;
+  z-index: 30;
+  display: flex;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--rule-strong);
+}
+
+.term-endbar button {
+  min-height: 30px;
+  padding: 4px 16px;
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid var(--rule-strong);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.term-endbar button:first-child {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.term-endbar button:hover,
+.term-endbar button:focus {
+  color: var(--text-1);
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* ---------- Live sessions on the connect form ---------- */
+
+.connect-form .sessions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.connect-form .sessions-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--font-mono);
+}
+
+.connect-form .sessions-list .key-name {
+  color: var(--text-1);
+  font-size: 15px;
+}
+
+.connect-form .sessions-list .key-kind {
+  color: var(--text-3);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.connect-form .session-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.connect-form .session-actions button {
+  min-height: 26px;
+  padding: 2px 10px;
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid var(--rule-strong);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.connect-form .session-actions button:hover,
+.connect-form .session-actions button:focus {
+  color: var(--text-1);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.connect-form .session-actions button.danger {
+  color: var(--alarm);
+}
+
+/* ---------------------------------------------------------------------------
+   File explorer (SCP tab)
+
+   Occupies the same box the terminal does — both are mounted at once and only
+   one is displayed, so a tab switch never re-measures xterm (see the note on
+   .term-files in terminal-window.js). The height maths therefore has to match
+   .term-frame's exactly, or the panes would run under the window edge.
+
+   Everything here reads the theme's own variables rather than hardcoding
+   colours: the explorer sits inside the same translucent panel as the terminal
+   and has to keep working under the reactive backdrop, where the background
+   behind it moves.
+--------------------------------------------------------------------------- */
+.term-files {
+  width: 100%;
+  height: calc(100% - 38px);
+  outline: none;
+  overflow: hidden;
+}
+
+.fx-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-family: var(--font-mono, monospace);
+  font-size: 15px;
+  color: var(--fg, #c8d0d4);
+}
+
+.fx-panes {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 1px;
+}
+
+.fx-pane {
+  flex: 1 1 50%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+/* The active pane is where a Copy would come FROM, so it needs to be readable
+   at a glance from across a room — a subtle border is not enough on a TV. */
+.fx-pane.active {
+  border-color: rgba(var(--accent-rgb), 0.55);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.18);
+}
+
+.fx-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
+  border-bottom: 1px solid rgba(var(--accent-rgb), 0.12);
+  background: rgba(var(--panel-bg-rgb), 0.35);
+}
+
+.fx-title {
+  color: var(--accent);
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+
+/* The path is the one thing here that can be arbitrarily long. It ellipsises
+   from the LEFT, because the tail of a path is what identifies it. */
+.fx-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  opacity: 0.75;
+  font-size: 13px;
+}
+
+.fx-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  outline: none;
+}
+
+.fx-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 8px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.fx-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fx-size {
+  flex: 0 0 auto;
+  opacity: 0.6;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fx-row.dir .fx-name {
+  color: var(--accent);
+}
+
+.fx-row.up .fx-name {
+  opacity: 0.7;
+}
+
+/* The selection is drawn on the row itself rather than with :focus, because the
+   focus target is the LIST — a tab stop per file would make the ring
+   unnavigable with a D-pad. */
+.fx-pane.active .fx-row.selected {
+  background: rgba(var(--accent-rgb), 0.22);
+  outline: 1px solid rgba(var(--accent-rgb), 0.5);
+  outline-offset: -1px;
+}
+
+/* The inactive pane keeps its selection visible but quiet: the user needs to
+   know where they will land when they come back, without it competing with the
+   pane they are actually in. */
+.fx-pane .fx-row.selected {
+  background: rgba(var(--accent-rgb), 0.09);
+}
+
+.fx-row.fx-empty,
+.fx-row.fx-error {
+  opacity: 0.7;
+  cursor: default;
+  font-style: italic;
+}
+
+.fx-row.fx-error {
+  color: #ff8a7a;
+}
+
+.fx-status {
+  padding: 3px 8px;
+  min-height: 20px;
+  font-size: 13px;
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fx-status[data-kind="error"] {
+  color: #ff8a7a;
+}
+
+.fx-status[data-kind="warn"] {
+  color: #ffc46b;
+}
+
+.fx-status[data-kind="ok"] {
+  color: var(--accent);
+}
+
+.fx-progress {
+  position: relative;
+  height: 18px;
+  margin: 0 8px 4px;
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.fx-progress-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: rgba(var(--accent-rgb), 0.3);
+  /* No transition: the bar is driven by a 200ms-throttled progress event, and
+     an easing on top of that reads as lag rather than as smoothness. */
+}
+
+.fx-progress-text {
+  position: relative;
+  display: block;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fx-actions {
+  display: flex;
+  gap: 6px;
+  padding: 4px 8px;
+  flex-wrap: wrap;
+}
+
+.fx-action {
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 10px;
+  color: inherit;
+  background: rgba(var(--panel-bg-rgb), 0.5);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.fx-action.selected {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.2);
+}
+
+.fx-hint {
+  padding: 0 8px 5px;
+  font-size: 12px;
+  opacity: 0.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Modals. Scoped inside .fx-root so they cover the explorer only — the toolbar
+   stays reachable, which matters when the dialog is the thing that is stuck. */
+.fx-modal-back {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(var(--panel-bg-rgb), 0.82);
+  z-index: 5;
+}
+
+.fx-modal {
+  min-width: 260px;
+  max-width: 80%;
+  padding: 14px 16px;
+  background: rgba(var(--panel-bg-rgb), 0.98);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
+  border-radius: 4px;
+}
+
+.fx-modal-title {
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.fx-modal-input {
+  width: 100%;
+  font: inherit;
+  padding: 5px 7px;
+  color: inherit;
+  background: rgba(var(--ink-0), 0.6);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: 3px;
+}
+
+.fx-modal-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.fx-modal-row {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.fx-modal-row button {
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 14px;
+  color: inherit;
+  background: rgba(var(--panel-bg-rgb), 0.6);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.fx-modal-row button:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.2);
+}
+
+.fx-modal-row button.fx-danger:focus {
+  border-color: #ff8a7a;
+  background: rgba(255, 138, 122, 0.22);
+}
+
+/* The files tab's own chrome. The swap button sits between the label and the ×
+   and stays visible on every tab — unlike the ×, it is the only route to the
+   other half of a connection, so hiding it until hover would hide the feature.
+   Sizing lives with .term-tab-x above; this is just its resting weight. */
+.term-tab-swap {
+  opacity: 0.55;
+}
+
+.term-tab:hover .term-tab-swap,
+.term-tab:focus .term-tab-swap,
+.term-tab.active .term-tab-swap {
+  opacity: 1;
+}
+
+/* The marker that says which half of the pair this tab is. Not a control: no
+   box, no hover, and it never takes the pointer. */
+.term-tab-icon {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+.term-tab-files .term-tab-label {
+  font-style: italic;
+}
+
+/* A local shell is not a host, and the strip should say so at a glance rather
+   than only in the tooltip: the label reads "local" (session-label.mjs) and
+   the dotted underline marks it as a different KIND of tab, not a host whose
+   name happens to be "local". */
+.term-tab-local .term-tab-label {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+/* The local-shell button stays enabled when the helper is missing — clicking
+   it is how you find out why (see openLocalShell in connect-form.js) — so the
+   unavailable state is a dimming, not a disabled control. */
+#local-btn.unavailable {
+  opacity: 0.55;
+}
+
+/* The SSH/SCP choice on the login page. A segmented pair rather than a
+   dropdown: webOS renders <select> as a system picker whose reachability from
+   the remote is inconsistent, and two mutually exclusive options do not need a
+   list. Sits left of Connect on the same line so the reading order matches the
+   sentence — open THIS, as THAT. */
+.connect-form .dest-mode {
+  display: inline-flex;
+  flex: 0 0 auto;
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.connect-form .mode-btn {
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 14px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.connect-form .mode-btn + .mode-btn {
+  border-left: 1px solid rgba(var(--accent-rgb), 0.25);
+}
+
+.connect-form .mode-btn.selected {
+  background: rgba(var(--accent-rgb), 0.2);
+  color: var(--accent);
+  opacity: 1;
+}
+
+/* Focus has to beat "selected" visually — on a remote the ring is the only
+   thing telling the user what OK will hit. */
+.connect-form .mode-btn:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+  opacity: 1;
+}
+
+
+/* ---------- Hover tooltip ---------- */
+
+/* One bubble, parented to <body> (see tooltip.js). Positioned in viewport
+   coordinates by JS, so `fixed` and no layout of its own.
+   z above every in-app overlay: the search bar and the key hint sit at 30, the
+   backdrop popover at 40, and a tooltip must be readable on top of all of
+   them. */
+.app-tip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 90;
+  max-width: 340px;
+  padding: 7px 11px;
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--rule-strong);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  /* Couch distance: this is the same floor the form labels use. Anything
+     smaller is decoration rather than information at 3 m. */
+  font-size: 14px;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition:
+    opacity 110ms var(--ease-1),
+    transform 110ms var(--ease-1);
+}
+
+.app-tip.open {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* The measuring pass needs real dimensions but must not flash the old text at
+   the old position, so it is laid out invisibly rather than hidden. */
+.app-tip.measuring {
+  opacity: 0;
+  transition: none;
+}
+
+/* A square rotated 45° rather than a border triangle: the triangle trick cannot
+   carry the 1px outline, and an outlined bubble with an unoutlined spike reads
+   as a rendering bug on a large screen. */
+.app-tip-arrow {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  background: var(--panel-bg-strong);
+  border-right: 1px solid var(--rule-strong);
+  border-bottom: 1px solid var(--rule-strong);
+  transform: rotate(-135deg);
+  top: -5px;
+}
+
+.app-tip.above .app-tip-arrow {
+  top: auto;
+  bottom: -5px;
+  transform: rotate(45deg);
+}

@@ -1,0 +1,45 @@
+<h3>webossh — an SSH client that runs on the TV itself</h3>
+
+<p>
+  A terminal panel that opens <em>above</em> whatever is already on screen —
+  YouTube, an HDMI input, a game — instead of replacing it. Hide it with Back
+  and the session keeps running; relaunch and you are back in the same shell,
+  with the last screenful of output replayed.
+</p>
+
+<h4>What you get</h4>
+<ul>
+  <li><b>Real terminal.</b> xterm.js with a WebGL renderer, scrollback, search,
+    mouse reporting, and correct <code>Esc</code>/<code>Ctrl</code> handling for
+    vim, less and tmux.</li>
+  <li><b>Password and key auth</b> (ed25519, RSA). Host keys are pinned on first
+    connect and the app tells you when one changes.</li>
+  <li><b>Files on the same connection.</b> The SCP tab is a second channel on the
+    SSH session you already opened — no second login — with streamed transfers
+    in both directions.</li>
+  <li><b>A local root shell on the TV</b>, in the same window and the same tabs.</li>
+  <li><b>Built for a remote.</b> Every control is reachable with the D-pad, the
+    key bar sends what a remote cannot (Esc, Tab, ^C, PgUp/PgDn), the on-screen
+    keyboard works when there is no USB keyboard, and the window can be moved,
+    resized and made translucent.</li>
+  <li><b>Themes that react to the picture behind them</b>, sampling the screen
+    and tinting the terminal against it.</li>
+</ul>
+
+<h4>Notes</h4>
+<p>
+  Needs Homebrew Channel for two of those features: the local shell needs a pty
+  the app's sandbox cannot allocate, and the reactive themes need the display
+  capture API. Both helpers ship inside this package and install themselves on
+  first start — there is nothing to do by hand. Without root the app still runs
+  and still opens remote SSH sessions.
+</p>
+<p>
+  A private key you store here is kept on the TV. If you also store its
+  passphrase, that passphrase is kept in plaintext beside it; leave it empty to
+  be asked at connect time instead.
+</p>
+<p>
+  MIT licensed. Source, issues and full documentation:
+  <a href="https://github.com/sh00bx/webos-ssh-client">github.com/sh00bx/webos-ssh-client</a>
+</p>

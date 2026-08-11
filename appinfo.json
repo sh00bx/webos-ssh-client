@@ -1,0 +1,19 @@
+{
+  "id": "com.pwntastic.sshclient",
+  "version": "0.8.1",
+  "vendor": "Pwntastic",
+  "type": "web",
+  "main": "index.html",
+  "title": "webossh",
+  "icon": "icon.png",
+  "largeIcon": "icon-large.png",
+  "iconColor": "#000000",
+  "uiRevision": 2,
+  "transparent": true,
+  "defaultWindowType": "overlay",
+  "noSplashOnLaunch": true,
+  "spinnerOnLaunch": false,
+  "disableBackHistoryAPI": true,
+  "supportTouchMode": "none",
+  "handlesRelaunch": true
+}

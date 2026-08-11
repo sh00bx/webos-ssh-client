@@ -1,0 +1,10 @@
+{
+  "id": "com.pwntastic.sshclient.service",
+  "description": "SSH client backend for the webOS SSH client app",
+  "services": [
+    {
+      "name": "com.pwntastic.sshclient.service",
+      "description": "ssh2-based SSH client"
+    }
+  ]
+}
