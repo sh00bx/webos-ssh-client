@@ -1,45 +1,115 @@
-<h3>webossh — an SSH client that runs on the TV itself</h3>
+<!--
+  The Homebrew Channel package page (referenced as fullDescriptionUrl from
+  sh00bx/webos-apps/repo.json, fetched from this repo's main branch).
 
-<p>
-  A terminal panel that opens <em>above</em> whatever is already on screen —
-  YouTube, an HDMI input, a game — instead of replacing it. Hide it with Back
-  and the session keeps running; relaunch and you are back in the same shell,
-  with the last screenful of output replayed.
+  Two constraints, both read out of the installed channel app rather than
+  assumed:
+    - it wraps this fragment in <div class="rich-description"> and runs it
+      through DOMPurify with FORBID_TAGS: style, form, input, button. So there
+      can be no <style> block — every rule here is an inline style attribute,
+      which DOMPurify keeps.
+    - it has no CSP, and already loads iconUri from raw.githubusercontent, so
+      remote images over https render. They are absolute URLs against main:
+      this file is read from a raw URL, so relative paths would resolve against
+      raw.githubusercontent and only work by accident.
+
+  Colours are kept to borders and rules (accent #73ff9a, the app's own), and
+  secondary text is opacity rather than a colour, so the page reads correctly
+  on the channel's dark theme without hardcoding a background it may change.
+-->
+
+<p style="margin:0 0 1.2em">
+  <img src="https://raw.githubusercontent.com/sh00bx/webos-ssh-client/main/docs/brand/banner.png"
+       alt="webossh — secure shell for the living room"
+       style="display:block;width:100%;max-width:1000px;border-radius:12px">
 </p>
 
-<h4>What you get</h4>
-<ul>
-  <li><b>Real terminal.</b> xterm.js with a WebGL renderer, scrollback, search,
-    mouse reporting, and correct <code>Esc</code>/<code>Ctrl</code> handling for
-    vim, less and tmux.</li>
-  <li><b>Password and key auth</b> (ed25519, RSA). Host keys are pinned on first
-    connect and the app tells you when one changes.</li>
-  <li><b>Files on the same connection.</b> The SCP tab is a second channel on the
-    SSH session you already opened — no second login — with streamed transfers
-    in both directions.</li>
-  <li><b>A local root shell on the TV</b>, in the same window and the same tabs.</li>
-  <li><b>Built for a remote.</b> Every control is reachable with the D-pad, the
-    key bar sends what a remote cannot (Esc, Tab, ^C, PgUp/PgDn), the on-screen
-    keyboard works when there is no USB keyboard, and the window can be moved,
-    resized and made translucent.</li>
+<p>
+  <b>A terminal that runs on the TV itself.</b> It opens <em>above</em> whatever is
+  already on screen &mdash; YouTube, an HDMI input, a game &mdash; instead of
+  replacing it. Press Back and the session keeps running in the background;
+  come back and you are in the same shell, with the last screenful of output
+  replayed.
+</p>
+
+<p style="margin:1.6em 0 0">
+  <img src="https://raw.githubusercontent.com/sh00bx/webos-ssh-client/main/docs/screenshots/terminal.png"
+       alt="The terminal panel over the picture behind it, with two session tabs"
+       style="display:block;width:100%;max-width:1000px;border-radius:10px;border:1px solid rgba(115,255,154,.25)">
+</p>
+<p style="opacity:.6;margin:.5em 0 2em">
+  Two tabs at once: a remote host and the TV's own root shell. The panel is
+  translucent, movable and resizable, and the picture keeps playing behind it.
+</p>
+
+<h4 style="border-left:3px solid #73ff9a;padding-left:.5em;margin-bottom:.6em">Connecting</h4>
+<p style="margin:0 0 1em">
+  Password or key (ed25519, RSA). Host keys are pinned on first connect and the
+  app tells you when one changes. Recent targets come back on the next launch,
+  so the usual case is two clicks from the launcher to a prompt.
+</p>
+<p style="margin:0">
+  <img src="https://raw.githubusercontent.com/sh00bx/webos-ssh-client/main/docs/screenshots/connect.png"
+       alt="The connect form: target, credentials, and the SSH/SCP choice"
+       style="display:block;width:100%;max-width:1000px;border-radius:10px;border:1px solid rgba(115,255,154,.25)">
+</p>
+<p style="opacity:.6;margin:.5em 0 2em">
+  The same form starts an SCP file session or a local shell on the TV.
+</p>
+
+<h4 style="border-left:3px solid #73ff9a;padding-left:.5em;margin-bottom:.6em">Built for a remote, not for a keyboard</h4>
+<p style="margin:0 0 1em">
+  Every control is reachable with the D-pad. The key bar sends what a remote
+  cannot &mdash; <code>Esc</code>, <code>Tab</code>, <code>^C</code>,
+  <code>PgUp</code>/<code>PgDn</code>, arrows &mdash; the webOS on-screen
+  keyboard is one button away when no USB keyboard is attached, and every
+  control says what it does if you rest on it.
+</p>
+<p style="margin:0">
+  <img src="https://raw.githubusercontent.com/sh00bx/webos-ssh-client/main/docs/screenshots/tooltips.png"
+       alt="The key bar and a tooltip explaining the on-screen keyboard button"
+       style="display:block;width:100%;max-width:1000px;border-radius:10px;border:1px solid rgba(115,255,154,.25)">
+</p>
+<p style="opacity:.6;margin:.5em 0 2em">
+  A USB keyboard works too, including <code>Ctrl</code> and <code>Alt</code>
+  chords.
+</p>
+
+<h4 style="border-left:3px solid #73ff9a;padding-left:.5em;margin-bottom:.6em">What is in it</h4>
+<ul style="margin:0 0 2em;line-height:1.55">
+  <li><b>A real terminal.</b> xterm.js with a WebGL renderer, scrollback,
+    search, mouse reporting, and correct <code>Esc</code>/<code>Ctrl</code>
+    handling for vim, less and tmux.</li>
+  <li><b>Files on the same connection.</b> The SCP tab is a second channel on
+    the SSH session you already opened &mdash; no second login &mdash; with
+    streamed transfers in both directions.</li>
+  <li><b>A local root shell on the TV</b>, in the same window and the same
+    tabs as the remote ones.</li>
+  <li><b>Sessions that outlive the window.</b> A background service holds them
+    while the app is hidden, so a long build is still running when you come
+    back.</li>
   <li><b>Themes that react to the picture behind them</b>, sampling the screen
-    and tinting the terminal against it.</li>
+    and tinting the terminal against it. Five fixed themes as well, if you
+    would rather it stayed put.</li>
 </ul>
 
-<h4>Notes</h4>
-<p>
-  Needs Homebrew Channel for two of those features: the local shell needs a pty
-  the app's sandbox cannot allocate, and the reactive themes need the display
-  capture API. Both helpers ship inside this package and install themselves on
-  first start — there is nothing to do by hand. Without root the app still runs
-  and still opens remote SSH sessions.
+<h4 style="border-left:3px solid #73ff9a;padding-left:.5em;margin-bottom:.6em">Good to know</h4>
+<p style="margin:0 0 1em">
+  <b>Root is optional.</b> Two features need it &mdash; the local shell needs a
+  pty the app's sandbox cannot allocate, and the reactive themes need the
+  display capture API. Both helpers ship inside this package and install
+  themselves on first start through the Homebrew Channel; there is nothing to
+  copy onto the TV by hand. Without root the app still runs and still opens
+  remote SSH sessions.
 </p>
-<p>
-  A private key you store here is kept on the TV. If you also store its
-  passphrase, that passphrase is kept in plaintext beside it; leave it empty to
-  be asked at connect time instead.
+<p style="margin:0 0 1.6em">
+  <b>Keys stay on the TV.</b> A private key you store here is kept on the TV
+  itself. If you also store its passphrase, that passphrase is kept in
+  plaintext beside it &mdash; leave it empty to be asked at connect time
+  instead.
 </p>
-<p>
-  MIT licensed. Source, issues and full documentation:
+
+<p style="opacity:.6;margin:0">
+  MIT licensed. Source, issues and documentation:
   <a href="https://github.com/sh00bx/webos-ssh-client">github.com/sh00bx/webos-ssh-client</a>
 </p>
