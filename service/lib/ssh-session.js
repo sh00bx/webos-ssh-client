@@ -10,6 +10,7 @@ const {
   addSubscriber,
   broadcast,
   bufferedOutput,
+  bufferedTerminalModes,
   sessionSummary,
   closeSession,
   failSession,
@@ -298,13 +299,18 @@ function handleAttach(message) {
     sessionId: session.id,
     stage: session.stage,
   });
+  // The replayed tail plus the terminal modes the remote set outside it. The
+  // modes ride in the replay payload rather than in an event of their own so
+  // that they cannot arrive before the content they apply to, and so a client
+  // that predates them needs no change to benefit.
   const replay = bufferedOutput(session);
-  if (replay) {
+  const modes = bufferedTerminalModes(session);
+  if (replay || modes) {
     safeRespond(message, {
       returnValue: true,
       event: "replay",
       sessionId: session.id,
-      data: replay,
+      data: replay + modes,
     });
   }
   if (session.stream) {

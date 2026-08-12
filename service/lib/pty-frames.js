@@ -23,12 +23,25 @@ const HEADER_BYTES = 5;
 // caller drops the connection rather than trying to buffer it.
 const MAX_PAYLOAD = 64 * 1024;
 
+// Writes the payload straight into the frame. The obvious spelling —
+// `Buffer.from(payload)` first, then copy that into the frame — moves every
+// byte twice, and the callers that matter hand us a zero-copy subarray of a
+// paste (see local-session.js), so both copies would be pure overhead on the
+// path this file exists to keep cheap.
 function encodeFrame(type, payload) {
-  const body = payload ? Buffer.from(payload) : Buffer.alloc(0);
-  const frame = Buffer.allocUnsafe(HEADER_BYTES + body.length);
+  const isBuffer = Buffer.isBuffer(payload);
+  const length = payload
+    ? isBuffer
+      ? payload.length
+      : Buffer.byteLength(payload, "utf8")
+    : 0;
+  const frame = Buffer.allocUnsafe(HEADER_BYTES + length);
   frame[0] = type & 0xff;
-  frame.writeUInt32BE(body.length, 1);
-  if (body.length) body.copy(frame, HEADER_BYTES);
+  frame.writeUInt32BE(length, 1);
+  if (length) {
+    if (isBuffer) payload.copy(frame, HEADER_BYTES);
+    else frame.write(payload, HEADER_BYTES, "utf8");
+  }
   return frame;
 }
 
@@ -57,8 +70,11 @@ function encodeResize(cols, rows) {
   return encodeWindow(PTY_FRAME.RESIZE, cols, rows);
 }
 
+// No pre-Buffering: encodeFrame writes a string's UTF-8 into the frame
+// directly, so materialising it here would reintroduce the copy that function
+// is written to avoid.
 function encodeData(data) {
-  return encodeFrame(PTY_FRAME.DATA, Buffer.from(data, "utf8"));
+  return encodeFrame(PTY_FRAME.DATA, data);
 }
 
 // Incremental decoder: feed it whatever the socket delivered, get back the

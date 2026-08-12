@@ -4,6 +4,12 @@ const { OUTPUT_BUFFER_LIMIT, SESSION_REAP_MS } = require("./config");
 const { safeRespond, getMessageToken } = require("./util");
 const { debugLog } = require("./debug-log");
 const { updateKeepAlive } = require("./keepalive");
+const {
+  createModeTracker,
+  trackTerminalModes,
+  terminalModeSequence,
+  enabledTerminalModes,
+} = require("./terminal-modes");
 
 // sessionId -> { id, client, stream, subscribers, outputBuffer, ...metadata }
 const sessions = new Map();
@@ -92,6 +98,10 @@ function broadcast(session, body) {
 function appendOutput(session, data) {
   const text = typeof data === "string" ? data : String(data || "");
   if (!text) return;
+  // Before any trimming: the mode tracker has to see every byte the remote
+  // sent, and the ring below deliberately throws bytes away.
+  if (!session.termModes) session.termModes = createModeTracker();
+  trackTerminalModes(session.termModes, text);
   let chunk = text;
   let bytes = Buffer.byteLength(chunk, "utf8");
   if (bytes > OUTPUT_BUFFER_LIMIT) {
@@ -115,6 +125,14 @@ function bufferedOutput(session) {
   return session.outputBuffer.map((chunk) => chunk.text).join("");
 }
 
+// The mode sequence an attaching client needs to end up in the state the remote
+// thinks it is in. Written AFTER the replay, not before: the replayed tail can
+// contain mode changes of its own, and those are older than what the tracker
+// holds — the tracker saw the whole stream, so it wins.
+function bufferedTerminalModes(session) {
+  return session ? terminalModeSequence(session.termModes) : "";
+}
+
 function sessionSummary(session) {
   return {
     id: session.id,
@@ -134,6 +152,11 @@ function sessionSummary(session) {
     ready: Boolean(session.stream),
     subscribers: session.subscribers.size,
     bufferedBytes: session.outputBytes || 0,
+    // Which private modes an attach would restore. Diagnostic only, but it is
+    // the one piece of state that made the dead-clicks bug invisible: without
+    // it, "the tracker restored nothing" and "the tracker never ran" look the
+    // same from outside.
+    terminalModes: enabledTerminalModes(session.termModes),
     writeCount: session.writeCount || 0,
     writeBytes: session.writeBytes || 0,
     resizeCount: session.resizeCount || 0,
@@ -233,6 +256,7 @@ module.exports = {
   broadcast,
   appendOutput,
   bufferedOutput,
+  bufferedTerminalModes,
   sessionSummary,
   closeSession,
   failSession,

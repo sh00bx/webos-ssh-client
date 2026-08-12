@@ -774,6 +774,32 @@ const connectPayload = {
     "ä",
   );
 
+  // Mouse reporting has to survive the replay ring dropping the sequence that
+  // switched it on. tmux emits it once when it first attaches; a client that
+  // reloads hours later replays only the tail, and without a restore it comes
+  // up with clicks silently dead while tmux still believes they work.
+  client.stream.emit("data", Buffer.from("\x1b[?1000h\x1b[?1006h"));
+  // More than OUTPUT_BUFFER_LIMIT in one go, so the enable sequence is gone
+  // from the ring rather than merely old.
+  client.stream.emit("data", Buffer.from("x".repeat(1024 * 1024 + 4096)));
+  await delay(FLUSH_WAIT_MS);
+  const modeMessage = makeMessage({ sessionId: ready.sessionId }, "modes-token");
+  attach.requestHandler(modeMessage);
+  const modeReplay = modeMessage.responses.find((r) => r.event === "replay");
+  assert(modeReplay, "attach should replay buffered output");
+  const MODE_RESTORE = "\x1b[?1000h\x1b[?1006h";
+  assert.ok(
+    modeReplay.data.endsWith(MODE_RESTORE),
+    "replay should end with the restored modes",
+  );
+  assert.ok(
+    !modeReplay.data.slice(0, -MODE_RESTORE.length).includes("\x1b[?1000h"),
+    "the ring should have dropped the original enable sequence",
+  );
+  const modeAttached = modeMessage.responses.find((r) => r.event === "attached");
+  assert.deepStrictEqual(modeAttached.session.terminalModes, [1000, 1006]);
+  attach.cancelHandler({ uniqueToken: "modes-token" });
+
   attach.cancelHandler({ uniqueToken: "attach-token" });
   const responseCountAfterAttachDetach = attachMessage.responses.length;
   client.stream.emit("data", Buffer.from("detached again\n"));
